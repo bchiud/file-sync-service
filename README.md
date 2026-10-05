@@ -1,4 +1,4 @@
-# Dropbox Clone
+# File Sync Service
 
 A content-addressed file storage & sync system, built as a learning project.
 It has two parts: a **FastAPI server** that stores files as hash-addressed blocks,
@@ -598,7 +598,7 @@ REDIS_URL                         # optional; set to enable multi-server realtim
 ### 1. Setup (once)
 
 ```bash
-uv venv DropboxClone --python /opt/homebrew/bin/python3.12
+uv venv --prompt file-sync-service --python /opt/homebrew/bin/python3.12
 source .venv/bin/activate
 uv pip install -r requirements.txt
 cp .env.example .env            # then fill in real values (see Configuration)
@@ -632,19 +632,19 @@ With the server running and the venv active, point the client at a local folder:
 python -m client \
     --server   http://127.0.0.1:8000 \
     --username alice --password secret123 \
-    --folder   ~/DropboxClone
+    --folder   ~/FileSync
 ```
 
 The client logs in, does an initial two-way sync, then **watches the folder** and
 pushes changes as they happen — while a WebSocket to `/ws` pulls remote updates
-the moment another device commits. Drop a file into `~/DropboxClone` and it uploads;
+the moment another device commits. Drop a file into `~/FileSync` and it uploads;
 run a second client against a different folder (or machine) with the same account
 and it appears there, without polling.
 
 ```bash
 # one-shot sync instead of continuous watching:
 python -m client --server http://127.0.0.1:8000 \
-    --username alice --password secret123 --folder ~/DropboxClone --once
+    --username alice --password secret123 --folder ~/FileSync --once
 ```
 
 | Flag                        | Default                 | Meaning                                   |

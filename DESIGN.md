@@ -1,4 +1,4 @@
-# Dropbox Clone — High-Level Design
+# File Sync Service — High-Level Design
 
 A content-addressed file storage and sync system: a **FastAPI server** that stores
 files as hash-addressed blocks, plus two clients — a **folder-watching sync daemon**
