@@ -22,8 +22,9 @@ the system is and *why* it's shaped the way it is.
 - **Multi-client, real-time** — a change on one device shows up on the others without
   polling.
 
-**Non-goals (v1):** conflict resolution / versioning (last-writer-wins), content-defined
-chunking, resumable transfers, write-sharing (all sharing is read-only). See
+**Non-goals (v1):** merging conflicting edits and file versioning (a conflict keeps both
+versions, one as a `(conflicted copy)`), content-defined chunking, resumable transfers,
+write-sharing (all sharing is read-only). See
 [§7](#7-known-limitations--tradeoffs).
 
 ---
@@ -61,7 +62,7 @@ cross-user dedup — an accepted trade.
 ## 3. System overview
 
 ```
-   ┌────────────┐     ┌────────────┐          Three clients, one delta engine.
+   ┌────────────┐     ┌────────────┐          Two clients, one delta engine.
    │ sync client│     │  web app   │          Bytes go client → B2 directly.
    │ (watchdog) │     │(React+Vite)│
    └─────┬──────┘     └─────┬──────┘
@@ -73,10 +74,10 @@ cross-user dedup — an accepted trade.
          │  (stateless)     │
          └───┬─────────┬────┘
              │         │
-        ┌────▼───┐ ┌───▼────┐ ┌─────────┐
-        │ Mongo  │ │  B2    │ │  Redis  │   metadata · block bytes · realtime pub/sub
+        ┌────▼───┐ ┌───▼────┐ ┌───────────┐
+        │ Mongo  │ │  B2    │ │   Redis   │   metadata · block bytes · realtime pub/sub
         │ (meta) │ │(blocks)│ │(ChangeBus)│
-        └────────┘ └───▲────┘ └─────────┘
+        └────────┘ └───▲────┘ └───────────┘
                        │
      client ──presigned PUT/GET──┘   block bytes bypass every server layer
 ```
@@ -169,7 +170,7 @@ share-links (the signed token *is* the capability; expiring + revocable via a
 | Area | v1 behavior | The real fix |
 |------|-------------|--------------|
 | **Chunking** | Fixed 4 MiB offsets — a 1-byte insert rewrites every hash | Content-defined chunking (rolling hash); the `split()` seam is isolated for it |
-| **Conflicts** | Last-writer-wins, no conflict copies | File versioning |
+| **Conflicts** | Both versions kept (one as a `(conflicted copy)`); no merge, no history | File versioning (keep prior recipes) |
 | **Large downloads** | Whole file reassembled in memory | Stream to disk as blocks arrive |
 | **Transfers** | Not resumable; fan-out unbounded | S3 multipart + checkpointing; bounded concurrency, batched URL minting |
 | **Revocation** | Stops *future* reads; already-issued presigned URLs live out their TTL (default 300s) | Bounded by design; batch-mint URLs to shrink the window |

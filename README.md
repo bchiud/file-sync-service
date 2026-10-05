@@ -1,9 +1,30 @@
 # File Sync Service
 
-A content-addressed file storage & sync system, built as a learning project.
-It has two parts: a **FastAPI server** that stores files as hash-addressed blocks,
-and a **sync client** — a folder-watching daemon that pushes/pulls changes, like
-the Dropbox desktop app.
+A content-addressed file storage and sync system: a **FastAPI server** that stores
+files as hash-addressed blocks, a **sync client** that watches a folder and
+pushes/pulls changes (like the Dropbox desktop app), and a **React web app** that
+runs the same delta engine in the browser.
+
+**Highlights**
+
+- **Delta uploads** — only changed 4 MiB blocks move: a 1 MB in-place edit to a
+  100 MB file uploads one block (4 MB, not 100 MB), and a duplicate file uploads nothing.
+- **File bytes never touch the app server** — clients PUT/GET blocks straight to
+  Backblaze B2 via presigned URLs; the API moves only hashes and recipes.
+- **Realtime multi-device sync** — a commit on one device reaches the others over
+  WebSockets, fanned out across servers by Redis pub/sub.
+- **No lost edits** — commits are an etag compare-and-swap; on a conflict the sync
+  client keeps both versions, one as a `(conflicted copy)`.
+- **Sharing** — read-only user-to-user grants and expiring, revocable public links.
+
+**Start here:** [DESIGN.md](DESIGN.md) for the big picture ·
+[Running](#running) to try it · [Demo via `curl`](#demo-the-whole-system-via-curl)
+
+**Contents:** [Core idea](#core-idea-content-addressed-storage) ·
+[Architecture](#architecture) · [Data models](#data-models) · [API](#api) ·
+[Authentication](#authentication) · [Sharing](#sharing--permissions) ·
+[Sync client](#sync-client) · [Configuration](#configuration) · [Running](#running) ·
+[Testing](#testing) · [Scaling](#scaling) · [Status & roadmap](#status--roadmap)
 
 - **Server API:** FastAPI (Python 3.12)
 - **Blocks:** Backblaze B2 (S3-compatible)
@@ -235,7 +256,7 @@ frontend/src/               # the web client — same delta engine, in the brows
     ├── download.ts        #     assembleBlocks (fetch · verify · reassemble) + saveBlob
     └── format.ts          #     displayPath · middleTruncate · formatSize · userColor
 
-tests/                      # mirrors app/ + client/ ; 100% coverage gate
+tests/                      # mirrors app/ + client/ ; coverage gate 90% (pytest.ini)
 ```
 
 ---
@@ -319,7 +340,9 @@ All `/files` and `/blocks` routes require `Authorization: Bearer <token>`.
 | Method | Path             | Body                        | Returns                        |
 |--------|------------------|-----------------------------|--------------------------------|
 | `POST` | `/auth/register` | JSON `{username, password}` | `201` `{username, created_at}` |
-| `POST` | `/auth/login`    | form `username, password`   | `{access_token, token_type}`   |
+| `POST` | `/auth/login`    | form `username, password`   | `{access_token, refresh_token, token_type}` |
+| `POST` | `/auth/refresh`  | JSON `{refresh_token}`      | `{access_token, token_type}` · `401` if revoked/expired |
+| `POST` | `/auth/logout`   | JSON `{refresh_token}`      | `204` — revokes that refresh token |
 
 **Delta flow** (used by the sync client — file bytes go directly to/from B2)
 
@@ -354,9 +377,9 @@ the etag the client last read:
 The write is a single-document compare-and-swap in Mongo (`replace_one` filtered on
 the etag), so it's atomic with no transaction. Re-committing identical content — a
 retry or two clients making the *same* edit — folds into a no-op rather than a
-false conflict. On a real `412` the client refetches, reconciles, and retries; the
-policy differs by client (headless sync auto-retries last-writer-wins, the browser
-prompts the user).
+false conflict. On a real `412` the policy differs by client: the sync client saves
+the server's version as a `(conflicted copy)` and retries once off the new etag; the
+browser shows an error and reloads the list so the user can retry.
 
 **Sharing** (read-only grants; `owner` is always the caller's token identity)
 
@@ -419,6 +442,11 @@ negotiation path touches Mongo alone.
   `sub` claim carries the username.
 - **`get_current_user`** decodes the bearer token on each protected request and
   returns the username, or raises `401` for a missing / invalid / expired token.
+- **Refresh tokens:** login also returns a 7-day refresh token. Its `jti` is
+  allowlisted in Mongo (`refresh_tokens`, TTL-reaped), so `/auth/logout` revokes it
+  by deleting the row; `/auth/refresh` mints a new 60-minute access token while the
+  row exists. A `typ` claim stops refresh, access, and share tokens being used as
+  one another.
 - **No user enumeration:** unknown-username and wrong-password both return the
   same generic `401` on login.
 - **No hash leakage:** routes return `UserRegisterResponse`, never the `User` model.
@@ -661,7 +689,8 @@ the same delta engine as the Python client — chunking, dedup, and hash
 verification all run in the browser, and block bytes go **browser → B2 directly**
 via presigned URLs. It covers:
 
-- **Auth** — register / login / logout (JWT held in memory).
+- **Auth** — register / login / logout. The access token is held in memory; the
+  refresh token is in `localStorage`, so the session survives a reload.
 - **Your files** — list, upload (block-level dedup), download (on-read hash
   verify), delete.
 - **Shared with you** — a second tab: incoming grants (`/shares/incoming`), with
@@ -788,12 +817,15 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                          # runs with coverage; fails under 90%
+uv pip install -r requirements-dev.txt
+pytest                          # backend + sync client, with coverage; fails under 90%
+
+cd frontend && npm test         # web client unit tests (Vitest)
 ```
 
-Tests mirror the `app/` and `client/` trees. External services (B2, Mongo) and
-HTTP are mocked or faked, so the suite runs offline and deterministically.
+Tests mirror the `app/` and `client/` trees. B2 and HTTP are mocked or faked. The
+suite needs a `.env`, and some router and dependency tests connect to the MongoDB it
+points at.
 
 ---
 

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/DropboxClone.iml" filepath="$PROJECT_DIR$/.idea/DropboxClone.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/file-sync-service.iml" filepath="$PROJECT_DIR$/.idea/file-sync-service.iml" />
     </modules>
   </component>
 </project>
