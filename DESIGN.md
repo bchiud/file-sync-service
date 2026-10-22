@@ -170,6 +170,11 @@ share-links (the signed token *is* the capability; expiring + revocable via a
 - **Concurrent writes** — `commit` is an `If-Match` / `If-None-Match` compare-and-swap
   on `etag = sha256(recipe)`, a single-document `replace_one` filtered on the etag, so
   it's atomic without a transaction.
+- **Block index is a strict subset of B2** — a Mongo `blocks` collection on
+  `(owner, hash)` lets `/blocks/missing` answer in one `$in` query instead of one B2
+  `HEAD` per hash. A block is indexed only after `commit` confirms it's in B2, so the
+  index can only over-report "missing" (a harmless re-upload), never claim a block that
+  isn't there (a committed but unreadable file).
 
 ---
 

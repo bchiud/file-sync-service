@@ -119,6 +119,7 @@ cd frontend && npm test         # web client (Vitest)
 
 Tests mirror the `app/` and `client/` trees, with B2 and HTTP mocked or faked. The
 suite needs a `.env`; some router and dependency tests connect to its MongoDB.
+Coverage is currently 100% (the CLI entry point `client/__main__.py` is excluded).
 
 ---
 
