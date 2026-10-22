@@ -88,6 +88,16 @@ def test_push_uploads_blocks_and_commits(setup):
         assert h in api.blocks  # block landed in the store
 
 
+def test_push_skips_a_backslash_name_and_still_pushes_the_rest(setup):
+    # the server 422s on "\" in a path; one such file must not abort the push for the others
+    engine, api, folder = setup
+    (folder / "a\\b.txt").write_bytes(b"bad name")
+    (folder / "c.txt").write_bytes(b"fine")
+    assert engine.push() == ["/c.txt"]
+    assert api.commits == [("/c.txt", None)]
+    assert api.blocks.keys() == {h for h, _ in chunker.split(b"fine")}  # no blocks uploaded for the skipped file
+
+
 def test_push_skips_unchanged_file(setup):
     engine, _, folder = setup
     (folder / "a.txt").write_bytes(b"hello")

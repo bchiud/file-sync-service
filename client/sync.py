@@ -65,6 +65,8 @@ class SyncEngine:
             if not file.is_file():
                 continue
             server_path = self._server_path(file)
+            if "\\" in server_path:
+                continue  # the server rejects "\" in paths (422): skip it rather than abort the whole push
             data = file.read_bytes()
             if not self._index.is_changed(server_path, data):
                 continue

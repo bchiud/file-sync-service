@@ -59,6 +59,11 @@ export function FileList() {
 
   // --- upload ---
   async function upload(file: File) {
+    // the server rejects "\" in paths (422); check before chunking/uploading any blocks
+    if (file.name.includes("\\")) {
+      setError(`Can't upload "${file.name}": filenames can't contain "\\".`);
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
