@@ -4,9 +4,8 @@ A content-addressed file storage and sync system: a **FastAPI server** that stor
 files as hash-addressed blocks, plus two clients — a **folder-watching sync daemon**
 and a **React web app** — that share one delta-sync engine.
 
-This is the big-picture view. The [README](./README.md) is the exhaustive reference
-(every route, every tradeoff, run instructions); read this first to understand *what*
-the system is and *why* it's shaped the way it is.
+This doc covers *what* the system is and *why* it's shaped the way it is. The
+[README](./README.md) covers running it and the API reference.
 
 ---
 
@@ -163,6 +162,15 @@ per-user block scoping makes "read-only" fall out as *less code* (there is no
 share-links (the signed token *is* the capability; expiring + revocable via a
 `jti` allowlist row).
 
+- **A read is scoped to one file, not the owner's namespace** — `download-urls`
+  presigns only hashes in the authorized file's recipe, so a block hash alone is never
+  a bearer capability.
+- **Token types don't cross** — access, refresh, and share tokens share `JWT_SECRET`,
+  so a `typ` claim checked on decode stops one being redeemed as another.
+- **Concurrent writes** — `commit` is an `If-Match` / `If-None-Match` compare-and-swap
+  on `etag = sha256(recipe)`, a single-document `replace_one` filtered on the etag, so
+  it's atomic without a transaction.
+
 ---
 
 ## 7. Known limitations & tradeoffs
@@ -207,8 +215,43 @@ work is all *control plane*:
 | Sync client | watchdog + httpx | Folder watch → push; WebSocket → pull |
 | Web app | React + Vite + TypeScript | Same delta engine in the browser (Web Crypto for hashing) |
 
-> **WebSocket vs. SSE** was a genuinely close call — the traffic is one-way, which is
-> exactly SSE's shape. WebSockets won only because the FastAPI server side is simpler and
-> the reconnect logic is now written and tested. See the README for the full comparison.
+**WebSocket vs. SSE** was a close call. The traffic is one-way (server pushes
+`{"type":"changed"}`, client refetches), which is exactly SSE's shape.
+
+- **For SSE:** `EventSource` reconnects for free; the WebSocket reconnect (backoff,
+  jitter) had to be hand-rolled.
+- **A wash:** neither can set auth headers, so both put the token in the query string.
+  SSE's `Last-Event-ID` replay isn't wanted either, since refetching on reconnect
+  reconciles against current state.
+- **For WebSockets:** FastAPI automates the upgrade, framing, and disconnect detection
+  (`WebSocketDisconnect`). SSE needs a hand-rolled `text/event-stream` generator with
+  `is_disconnected()` polling.
+
+WebSockets stayed because the server side is simpler and the reconnect is already
+written and tested.
+
+---
+
+## 10. Hardening backlog
+
+Deferred as policy layered on the existing model, not architecture:
+
+- **Access-token revocation** — logout kills only the refresh `jti`; a stolen access
+  token is valid to its `exp` (60 min). Fix: a short-TTL Redis denylist, or shorter
+  access tokens.
+- **Refresh-token rotation** — refresh tokens don't rotate, so a stolen one works for
+  7 days with no theft signal. Fix: mint a new `jti` per refresh; reuse of a retired
+  one flags compromise.
+- **httpOnly cookies** — the web client keeps tokens in `localStorage` (XSS-readable).
+  Cookies remove that, at the cost of CSRF defenses.
+- **Login rate-limiting** — no throttle on `/auth/login`. Fix: a per-IP/per-account
+  Redis token bucket.
+- **Request size bounds** — `hashes` / `block_hashes` lists are unbounded (one request
+  can trigger *N* B2 `HEAD`s). Fix: Pydantic `Field(max_length=…)`.
+- **Upload size limits** — a presigned PUT carries no size limit. Fix: presigned POST
+  with `content-length-range` (if B2 supports it), else an audit sweep.
+- **Per-user quotas** — no per-owner byte total. Fix: a counter keyed on `owner`.
+- **File versioning** — keep prior recipes, so any overwritten version is
+  recoverable, not just conflict copies.
 </content>
 </invoke>
